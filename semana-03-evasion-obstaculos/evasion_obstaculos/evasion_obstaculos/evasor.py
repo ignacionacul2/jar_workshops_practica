@@ -133,7 +133,27 @@ class Evasor(Node):
              calibrados como pensás, antes de que el error se note como un
              giro raro del robot.
         """
-        pass
+
+        scan = self.ultimo_scan
+        if scan is None:
+            return False
+
+        rangos = np.array(scan.ranges)
+
+        #2. Angulo de cada rayo: el primero esta en angle_min y cada uno siguiente esta en angle_increment mas adelante
+        angulos = scan.angle_min + np.arange(len(rangos)) * scan.angle_increment
+
+        centro = math.radians(self.angulo_frente_deg)
+        diferencia = angulos - centro
+        diferencia = np.arctan2(np.sin(diferencia), np.cos(diferencia))
+
+        mitad_cono = math.radians(self.angulo_vision_deg / 2)
+        dentro_cono = np.abs(diferencia) <= mitad_cono
+        mas_cerca = rangos < self.distancia_choque_m
+
+        mascara = dentro_cono & mas_cerca
+        self.publicar_scan_filtrado(mascara)
+        return bool(np.any(mascara))
 
     def iniciar_giro(self):
         """Guarda el yaw actual como referencia para saber, más adelante,
@@ -150,6 +170,7 @@ class Evasor(Node):
         adelante, a velocidad_adelante (m/s)."""
         msg = Twist()
         # TODO: completar el campo de avance
+        msg.linear.x = self.velocidad_adelante
         return msg
 
     def girar(self) -> Twist:
@@ -157,6 +178,7 @@ class Evasor(Node):
         a velocidad_angular (rad/s)."""
         msg = Twist()
         # TODO: completar el campo de giro
+        msg.angular.z = self.velocidad_angular
         return msg
 
     def maquina_de_estados(self):
@@ -178,6 +200,20 @@ class Evasor(Node):
         Tip: loguear cada transición ayuda a debuggear en qué estado está
         el robot en cada momento.
         """
+
+        if self.yaw_actual is None:
+            return
+
+        if self.estado == ESTADO_AVANZAR:
+            if self.hay_obstaculo():
+                self.iniciar_giro()
+                self.estado = ESTADO_GIRAR
+                self.get_logger().info('AVANZAR -> GIRAR: obstaculo adelante')
+
+        if self.estado == ESTADO_GIRAR:
+            if self.angulo_girado() >= math.radians(self.angulo_giro_deg):
+                self.estado = ESTADO_AVANZAR
+                self.get_logger().info('GIRAR -> AVANZAR: giro completo')
 
         # Transición de estados
 
